@@ -7,7 +7,11 @@ users browse them in a Next.js page that also runs as a Telegram Mini App.
 - `backend/`  — FastAPI. The ONLY service that touches PostgreSQL and MinIO.
 - `bot/`      — aiogram 3, webhook mode. Talks to backend over HTTP only.
 - `frontend/` — Next.js App Router. Fetches data from backend.
-- `infra/`    — docker-compose, Caddy (HTTPS + load balancing).
+- `infra/`    — infrastructure configs (Caddy: HTTPS + load balancing).
+- `compose.yaml` (repo root) — all services; `docker compose up -d` reads `.env` from root.
+  - MinIO images are `pgsty/minio` / `pgsty/mc` (official minio/* images are no longer published).
+  - One-shot `minio-init` creates `$MINIO_BUCKET` with anonymous read; app services
+    should depend on it with `condition: service_completed_successfully`.
 - Flow: bot → POST /products (multipart) → backend → MinIO (image) + Postgres (row).
 
 ## Hard rules (graded strictly)
@@ -25,6 +29,9 @@ Every service must run as multiple replicas at once:
 - No styling needed — plain markup is acceptable per the task.
 
 ## Commands
+- `cp .env.example .env` — first-time setup.
+- `docker compose up -d` / `docker compose ps -a` / `docker compose down`.
+
 <!-- fill in as they appear -->
 
 ## Workflow
