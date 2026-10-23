@@ -1,12 +1,22 @@
 name: test-catalog
 
-x-backend-env: &backend-env
+# Least privilege: `migrate` gets only the database settings.
+x-db-env: &db-env
   POSTGRES_HOST: postgres
   POSTGRES_PORT: 5432
   POSTGRES_USER: ${POSTGRES_USER:?set in .env}
   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
   POSTGRES_DB: ${POSTGRES_DB:?set in .env}
+
+x-backend-env: &backend-env
+  <<: *db-env
   MEDIA_BASE_URL: ${MEDIA_BASE_URL:?set in .env}
+  MINIO_ENDPOINT_URL: http://minio:9000
+  MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set in .env}
+  MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set in .env}
+  MINIO_BUCKET: ${MINIO_BUCKET:?set in .env}
+  INTERNAL_TOKEN: ${INTERNAL_TOKEN:?set in .env}
+  MAX_IMAGE_BYTES: ${MAX_IMAGE_BYTES:-10485760}
 
 services:
   postgres:
@@ -73,7 +83,7 @@ services:
     image: test-catalog-backend
     restart: "no"
     command: ["alembic", "upgrade", "head"]
-    environment: *backend-env
+    environment: *db-env
     depends_on:
       postgres:
         condition: service_healthy

@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from alembic import context
 from app import models  # noqa: F401  (registers tables on Base.metadata)
-from app.config import get_settings
+from app.config import get_database_settings
 from app.db import Base
 
 config = context.config
@@ -18,7 +18,8 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 # The URL comes from env vars (pydantic-settings), never from alembic.ini.
-database_url = get_settings().database_url
+# DatabaseSettings only: migrations need POSTGRES_* and no app secrets.
+database_url = get_database_settings().database_url
 
 
 def run_migrations_offline() -> None:

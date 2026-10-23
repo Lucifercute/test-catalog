@@ -13,6 +13,14 @@ users browse them in a Next.js page that also runs as a Telegram Mini App.
   - One-shot `minio-init` creates `$MINIO_BUCKET` with anonymous read; app services
     should depend on it with `condition: service_completed_successfully`.
 - Flow: bot → POST /products (multipart) → backend → MinIO (image) + Postgres (row).
+- `POST /products` (bot only): multipart `title`, `image`, `chat_id`, `message_id`;
+  header `X-Internal-Token` (= `INTERNAL_TOKEN`). Responses: 201 created, 200 already exists
+  (same `(chat_id, message_id)`), 401 bad token, 413 > `MAX_IMAGE_BYTES`, 415 not jpeg/png/webp
+  (Content-Type must match magic bytes), 422 bad title (1-255 chars after strip).
+  Image key: `products/{chat_id}/{message_id}.{ext}`.
+- Backend S3 client: aiobotocore, one per process, created in lifespan → `app.state.s3`.
+- Settings: `DatabaseSettings` (POSTGRES_* only; used by alembic) ⊂ `Settings` (app).
+  `migrate` gets only POSTGRES_* (`x-db-env` in compose) — least privilege.
 
 ## Hard rules (graded strictly)
 Every service must run as multiple replicas at once:
@@ -35,9 +43,11 @@ Every service must run as multiple replicas at once:
 - `docker compose run --rm migrate` — apply migrations manually (idempotent).
 - Until Caddy: each backend replica has its own host port (`BACKEND_HOST_PORTS`, default
   8001-8002) — `curl localhost:8001/health`, `curl localhost:8002/products`.
-- Backend (`cd backend`): `uv sync`; `uv run pytest` (needs Docker: testcontainers Postgres);
-  `uv run ruff check . && uv run ruff format --check .`;
-  `uv run alembic revision -m "..."` for a new migration (needs POSTGRES_* / MEDIA_BASE_URL env).
+- Backend (`cd backend`): `uv sync`; `uv run pytest` (needs Docker: testcontainers
+  Postgres + MinIO, same images as compose); `uv run ruff check . && uv run ruff format --check .`;
+  `uv run alembic revision -m "..."` for a new migration (needs only POSTGRES_* env).
+- Create a product by hand: `curl -H "X-Internal-Token: $INTERNAL_TOKEN" -F title=Mug
+  -F chat_id=1 -F message_id=1 -F image=@mug.jpg localhost:8001/products`.
 
 <!-- fill in as they appear -->
 

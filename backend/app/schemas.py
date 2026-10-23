@@ -4,6 +4,8 @@ from pydantic import BaseModel
 
 from app.models import Product
 
+TITLE_MAX_LENGTH = 255
+
 
 class ProductOut(BaseModel):
     id: int
