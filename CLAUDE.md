@@ -31,6 +31,13 @@ Every service must run as multiple replicas at once:
 ## Commands
 - `cp .env.example .env` — first-time setup.
 - `docker compose up -d` / `docker compose ps -a` / `docker compose down`.
+- `docker compose up -d --build backend` — rebuild backend (migrate runs first).
+- `docker compose run --rm migrate` — apply migrations manually (idempotent).
+- Until Caddy: each backend replica has its own host port (`BACKEND_HOST_PORTS`, default
+  8001-8002) — `curl localhost:8001/health`, `curl localhost:8002/products`.
+- Backend (`cd backend`): `uv sync`; `uv run pytest` (needs Docker: testcontainers Postgres);
+  `uv run ruff check . && uv run ruff format --check .`;
+  `uv run alembic revision -m "..."` for a new migration (needs POSTGRES_* / MEDIA_BASE_URL env).
 
 <!-- fill in as they appear -->
 
