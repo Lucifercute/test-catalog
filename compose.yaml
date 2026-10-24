@@ -95,16 +95,39 @@ services:
     environment: *backend-env
     deploy:
       replicas: 2
-    # Until Caddy exists: a port range gives each replica its own host port
-    # (8001, 8002) so both can be checked directly. Replace with `expose` later.
-    ports:
-      - "${BACKEND_HOST_PORTS:-8001-8002}:8000"
+    # No host ports: reachable only through Caddy (/api/*).
     depends_on:
       migrate:
         condition: service_completed_successfully
       minio-init:
         condition: service_completed_successfully
 
+  # Single entry point: /api/* -> backend replicas, /media/* -> MinIO bucket (read-only).
+  caddy:
+    image: caddy:2.11.7-alpine
+    restart: unless-stopped
+    environment:
+      MINIO_BUCKET: ${MINIO_BUCKET:?set in .env}
+    ports:
+      - "${CADDY_HTTP_PORT:-8080}:80"
+    volumes:
+      - ./infra/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    depends_on:
+      backend:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+
 volumes:
   pg_data:
   minio_data:
+  caddy_data:
+  caddy_config:

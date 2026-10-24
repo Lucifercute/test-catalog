@@ -7,7 +7,14 @@ users browse them in a Next.js page that also runs as a Telegram Mini App.
 - `backend/`  — FastAPI. The ONLY service that touches PostgreSQL and MinIO.
 - `bot/`      — aiogram 3, webhook mode. Talks to backend over HTTP only.
 - `frontend/` — Next.js App Router. Fetches data from backend.
-- `infra/`    — infrastructure configs (Caddy: HTTPS + load balancing).
+- `infra/`    — infrastructure configs (`infra/Caddyfile`).
+- Caddy (`caddy:2.11.7-alpine`) is the ONLY published entry point (`CADDY_HTTP_PORT`, default 8080;
+  HTTP now, HTTPS at deploy). Backend has no host ports.
+  - `/api/*` → backend, prefix stripped; `dynamic a backend 8000` makes each replica its own
+    upstream, `round_robin`, no sticky sessions (passive health + `lb_retries`).
+  - `/media/*` → MinIO `/$MINIO_BUCKET/*`, GET/HEAD only (else 405), query string dropped,
+    `/media/` → 404 (the bucket's anonymous policy allows ListBucket; Caddy hides it).
+  - `/healthz` — Caddy's own healthcheck.
 - `compose.yaml` (repo root) — all services; `docker compose up -d` reads `.env` from root.
   - MinIO images are `pgsty/minio` / `pgsty/mc` (official minio/* images are no longer published).
   - One-shot `minio-init` creates `$MINIO_BUCKET` with anonymous read; app services
@@ -41,13 +48,13 @@ Every service must run as multiple replicas at once:
 - `docker compose up -d` / `docker compose ps -a` / `docker compose down`.
 - `docker compose up -d --build backend` — rebuild backend (migrate runs first).
 - `docker compose run --rm migrate` — apply migrations manually (idempotent).
-- Until Caddy: each backend replica has its own host port (`BACKEND_HOST_PORTS`, default
-  8001-8002) — `curl localhost:8001/health`, `curl localhost:8002/products`.
+- Everything goes through Caddy: `curl localhost:8080/api/health`, `curl localhost:8080/api/products`,
+  `curl -I localhost:8080/media/products/1/1.jpg`.
 - Backend (`cd backend`): `uv sync`; `uv run pytest` (needs Docker: testcontainers
   Postgres + MinIO, same images as compose); `uv run ruff check . && uv run ruff format --check .`;
   `uv run alembic revision -m "..."` for a new migration (needs only POSTGRES_* env).
 - Create a product by hand: `curl -H "X-Internal-Token: $INTERNAL_TOKEN" -F title=Mug
-  -F chat_id=1 -F message_id=1 -F image=@mug.jpg localhost:8001/products`.
+  -F chat_id=1 -F message_id=1 -F image=@mug.jpg localhost:8080/api/products`.
 
 <!-- fill in as they appear -->
 

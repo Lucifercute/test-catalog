@@ -1,0 +1,45 @@
+# Single entry point. HTTP only for now; at deploy the site address becomes the domain
+# and Caddy turns on automatic HTTPS.
+:80 {
+	handle /healthz {
+		respond "OK" 200
+	}
+
+	# /api/foo -> backend /foo. Every A record of the `backend` service (one per replica)
+	# becomes its own upstream, so round_robin really alternates replicas; no sticky sessions.
+	# Active health checks don't run for dynamic upstreams: passive checks + retries skip a dead one.
+	handle_path /api/* {
+		reverse_proxy {
+			dynamic a backend 8000 {
+				refresh 5s
+			}
+			lb_policy round_robin
+			lb_retries 2
+			fail_duration 10s
+		}
+	}
+
+	# /media/products/1/1.jpg -> MinIO /<bucket>/products/1/1.jpg, read-only.
+	# `route` keeps the order as written (respond before rewrite).
+	handle_path /media/* {
+		route {
+			@write not method GET HEAD
+			header @write Allow "GET, HEAD"
+			respond @write 405
+
+			# Bucket root = ListBucket (minio-init's "download" policy allows it): don't expose it.
+			respond / 404
+
+			# Trailing "?" clears the query string: no S3 sub-resources (?acl, ?uploads...) via the proxy.
+			rewrite * /{$MINIO_BUCKET}{path}?
+			reverse_proxy minio:9000 {
+				header_up -Authorization
+				header_up -Cookie
+			}
+		}
+	}
+
+	handle {
+		respond 404
+	}
+}
