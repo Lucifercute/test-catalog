@@ -34,7 +34,9 @@ Console → Networking → Virtual Cloud Networks → VCN → подсеть и�
 sudo ss -ltnup '( sport = :80 or sport = :443 )'
 
 # firewalld
-sudo firewall-cmd --permanent --add-service=http --add-service=https --add-port=443/udp
+# --add-service and --add-port can't be combined in one call
+sudo firewall-cmd --permanent --add-service=http --add-service=https
+sudo firewall-cmd --permanent --add-port=443/udp
 sudo firewall-cmd --reload
 sudo firewall-cmd --list-all
 ```
