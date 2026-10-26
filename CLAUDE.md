@@ -6,7 +6,7 @@ users browse them in a Next.js page that also runs as a Telegram Mini App.
 ## Architecture
 - `backend/`  — FastAPI. The ONLY service that touches PostgreSQL and MinIO.
 - `bot/`      — aiogram 3, webhook mode. Talks to backend over HTTP only.
-- `frontend/` — Next.js App Router. Fetches data from backend.
+- `frontend/` — Next.js 16 App Router (TypeScript 5.9 — Next doesn't officially support TS 6/7). Fetches data from backend.
 - `infra/`    — infrastructure configs (`infra/Caddyfile`).
 - Caddy (`caddy:2.11.7-alpine`) is the ONLY published entry point (`CADDY_HTTP_PORT`, default 8080;
   HTTP now, HTTPS at deploy). Backend has no host ports.
@@ -17,6 +17,7 @@ users browse them in a Next.js page that also runs as a Telegram Mini App.
   - `/tg/webhook` → bot replicas (`dynamic a bot 8080`, same balancing), POST only (else 405),
     path kept. The bot itself checks `X-Telegram-Bot-Api-Secret-Token` (401).
   - `/healthz` — Caddy's own healthcheck.
+  - everything else (fallback `handle`) → frontend replicas (`dynamic a frontend 3000`, same balancing).
 - `compose.yaml` (repo root) — all services; `docker compose up -d` reads `.env` from root.
   - MinIO images are `pgsty/minio` / `pgsty/mc` (official minio/* images are no longer published).
   - One-shot `minio-init` creates `$MINIO_BUCKET` with anonymous read; app services
@@ -42,6 +43,16 @@ users browse them in a Next.js page that also runs as a Telegram Mini App.
     with `secret_token`, commands (admins get `/new` via `BotCommandScopeChat`), Mini App menu
     button. Replicas never call `set_webhook`. Gets no `INTERNAL_TOKEN`.
   - Telegram needs HTTPS: `PUBLIC_BASE_URL`/`WEBAPP_URL` are https-only; locally use a tunnel.
+- Frontend (`frontend/`, `next start` via standalone `server.js` on :3000, 2 replicas, no host ports):
+  - `/` — server component, `dynamic = 'force-dynamic'`, `fetch` with `cache: 'no-store'` and a 5 s
+    timeout (`lib/backend.ts`, `import 'server-only'`). `BACKEND_URL=http://caddy/api` is server-only,
+    never `NEXT_PUBLIC_*`. Empty list → «Товаров пока нет»; backend error → message, page still 200.
+  - Images: plain `<img src={image_url}>`, never `next/image` (its optimizer caches on each replica's
+    disk; `images.unoptimized` too). `MEDIA_BASE_URL=/media` — page and images share Caddy's origin.
+  - Telegram: `telegram-web-app.js` via `next/script` `beforeInteractive` in the root layout;
+    `app/telegram-ready.tsx` calls `WebApp.ready()`; a no-op in a regular browser.
+  - `/health` — liveness for the Docker healthcheck, doesn't call the backend.
+  - Dockerfile: multi-stage, `output: 'standalone'`, runs as `node`, `HOSTNAME=0.0.0.0`.
 - Settings: `DatabaseSettings` (POSTGRES_* only; used by alembic) ⊂ `Settings` (app).
   `migrate` gets only POSTGRES_* (`x-db-env` in compose) — least privilege.
 
@@ -64,13 +75,15 @@ Every service must run as multiple replicas at once:
 - `docker compose up -d` / `docker compose ps -a` / `docker compose down`.
 - `docker compose up -d --build backend` — rebuild backend (migrate runs first).
 - `docker compose run --rm migrate` — apply migrations manually (idempotent).
-- Everything goes through Caddy: `curl localhost:8080/api/health`, `curl localhost:8080/api/products`,
+- Everything goes through Caddy: `curl localhost:8080/` (catalog), `curl localhost:8080/api/health`, `curl localhost:8080/api/products`,
   `curl -I localhost:8080/media/products/1/1.jpg`.
 - Backend (`cd backend`): `uv sync`; `uv run pytest` (needs Docker: testcontainers
   Postgres + MinIO, same images as compose); `uv run ruff check . && uv run ruff format --check .`;
   `uv run alembic revision -m "..."` for a new migration (needs only POSTGRES_* env).
 - Bot (`cd bot`): `uv sync`; `uv run pytest` (no Docker, fake Bot API session + httpx
   MockTransport); `uv run ruff check . && uv run ruff format --check .`.
+- Frontend (`cd frontend`): `npm ci`; `npm run typecheck && npm run build`;
+  `BACKEND_URL=http://localhost:8080/api npm run dev` (needs compose running).
 - `docker compose run --rm bot-setup` — re-register webhook/commands/menu (idempotent).
 - After editing `infra/Caddyfile`: `docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile`.
 - Create a product by hand: `curl -H "X-Internal-Token: $INTERNAL_TOKEN" -F title=Mug

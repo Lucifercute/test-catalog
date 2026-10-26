@@ -108,7 +108,8 @@ services:
       minio-init:
         condition: service_completed_successfully
 
-  # Single entry point: /api/* -> backend replicas, /media/* -> MinIO bucket (read-only).
+  # Single entry point: /api/* -> backend replicas, /media/* -> MinIO bucket (read-only),
+  # /tg/webhook -> bot replicas, everything else -> frontend replicas.
   caddy:
     image: caddy:2.11.7-alpine
     restart: unless-stopped
@@ -145,6 +146,21 @@ services:
       replicas: 2
     # No host ports: Telegram reaches it through Caddy (/tg/webhook).
     # Caddy doesn't depend on bot: `dynamic a` resolves replicas lazily (no cycle).
+    depends_on:
+      caddy:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    image: test-catalog-frontend
+    restart: unless-stopped
+    environment:
+      # Server-only (not NEXT_PUBLIC_*): server components fetch through Caddy -> backend replicas.
+      BACKEND_URL: http://caddy/api
+    deploy:
+      replicas: 2
+    # No host ports: browsers reach it through Caddy (fallback route).
+    # Caddy doesn't depend on frontend: `dynamic a` resolves replicas lazily (no cycle).
     depends_on:
       caddy:
         condition: service_healthy

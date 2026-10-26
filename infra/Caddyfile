@@ -59,7 +59,16 @@
 		}
 	}
 
+	# Everything else -> frontend (Next.js) replicas, same balancing as /api.
+	# Both replicas run one image, so /_next/static/* hashes match and no sticky sessions are needed.
 	handle {
-		respond 404
+		reverse_proxy {
+			dynamic a frontend 3000 {
+				refresh 5s
+			}
+			lb_policy round_robin
+			lb_retries 2
+			fail_duration 10s
+		}
 	}
 }

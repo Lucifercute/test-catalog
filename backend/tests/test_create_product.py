@@ -60,7 +60,7 @@ async def test_create(
     body = response.json()
     key = f"products/{chat_id}/1.png"
     assert body["title"] == "Mug"
-    assert body["image_url"] == f"http://media.test/media/{key}"
+    assert body["image_url"] == f"/media/{key}"
 
     product = await session.scalar(select(Product))
     assert product is not None

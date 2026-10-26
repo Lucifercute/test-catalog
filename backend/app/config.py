@@ -29,7 +29,8 @@ class DatabaseSettings(BaseSettings):
 
 
 class Settings(DatabaseSettings):
-    # Public prefix for product images, e.g. http://localhost:8080/media
+    # Public prefix for product images: "/media" (same origin as the page, via Caddy)
+    # or an absolute URL. image_url = media_base_url + "/" + image_key.
     media_base_url: str
 
     minio_endpoint_url: str

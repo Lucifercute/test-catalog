@@ -18,7 +18,8 @@ from app.config import get_database_settings, get_settings
 from app.main import create_app
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
-MEDIA_BASE_URL = "http://media.test/media/"
+# Relative, as in .env.example; the trailing "/" checks there is no double slash.
+MEDIA_BASE_URL = "/media/"
 # Same image as in compose.yaml.
 MINIO_IMAGE = "pgsty/minio:RELEASE.2026-08-04T00-00-00Z"
 MINIO_USER = "minioadmin"

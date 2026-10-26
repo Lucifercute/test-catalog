@@ -6,6 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Product
+from app.schemas import ProductOut
 
 BASE_TIME = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -46,9 +47,30 @@ async def test_image_url_uses_media_base_url(client: AsyncClient, session: Async
     (product,) = (await client.get("/products")).json()
 
     # MEDIA_BASE_URL in tests ends with "/": no double slash expected.
-    assert product["image_url"] == "http://media.test/media/products/0.jpg"
+    assert product["image_url"] == "/media/products/0.jpg"
     assert "image_key" not in product
     assert "chat_id" not in product
+
+
+@pytest.mark.parametrize(
+    ("media_base_url", "expected"),
+    [
+        ("/media", "/media/products/1/2.jpg"),
+        ("/media/", "/media/products/1/2.jpg"),
+        ("http://x.test/media", "http://x.test/media/products/1/2.jpg"),
+    ],
+)
+def test_image_url_relative_or_absolute(media_base_url: str, expected: str) -> None:
+    product = Product(
+        id=1,
+        title="Mug",
+        image_key="products/1/2.jpg",
+        chat_id=1,
+        message_id=2,
+        created_at=BASE_TIME,
+    )
+
+    assert ProductOut.from_model(product, media_base_url).image_url == expected
 
 
 async def test_list_pagination(client: AsyncClient, session: AsyncSession) -> None:
