@@ -224,11 +224,15 @@ services:
     environment:
       <<: *telegram-env
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?set in .env}
+    # The image's HEALTHCHECK probes the bot's web server, which this one-shot never starts.
+    healthcheck:
+      disable: true
     logging: *logging
     deploy:
       resources:
         limits:
-          memory: 128M
+          # aiogram alone needs ~160M; at 128M it thrashed and took minutes instead of seconds.
+          memory: 256M
     # Turn the webhook on only once replicas can take updates.
     depends_on:
       bot:
