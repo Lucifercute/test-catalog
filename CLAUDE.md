@@ -14,6 +14,8 @@ users browse them in a Next.js page that also runs as a Telegram Mini App.
     upstream, `round_robin`, no sticky sessions (passive health + `lb_retries`).
   - `/media/*` → MinIO `/$MINIO_BUCKET/*`, GET/HEAD only (else 405), query string dropped,
     `/media/` → 404 (the bucket's anonymous policy allows ListBucket; Caddy hides it).
+  - `/tg/webhook` → bot replicas (`dynamic a bot 8080`, same balancing), POST only (else 405),
+    path kept. The bot itself checks `X-Telegram-Bot-Api-Secret-Token` (401).
   - `/healthz` — Caddy's own healthcheck.
 - `compose.yaml` (repo root) — all services; `docker compose up -d` reads `.env` from root.
   - MinIO images are `pgsty/minio` / `pgsty/mc` (official minio/* images are no longer published).
@@ -26,6 +28,20 @@ users browse them in a Next.js page that also runs as a Telegram Mini App.
   (Content-Type must match magic bytes), 422 bad title (1-255 chars after strip).
   Image key: `products/{chat_id}/{message_id}.{ext}`.
 - Backend S3 client: aiobotocore, one per process, created in lifespan → `app.state.s3`.
+- Bot (`bot/`, aiohttp on :8080, 2 replicas, no host ports): `SimpleRequestHandler` with
+  `handle_in_background=False` — the webhook answers only after the handler finishes, so a
+  transient failure (backend down/5xx/429, Telegram network error) raises → 500 → Telegram
+  redelivers (safe: `POST /products` is idempotent). Permanent errors (413/415/422/401) are
+  answered to the admin and acked with 200; so are `TelegramForbiddenError`/`TelegramBadRequest`
+  (narrow `router.errors` handler). Never add a catch-all errors handler — it would kill the retry.
+  - No FSM (`Dispatcher(disable_fsm=True)`): admin sends photo + caption in one message.
+  - Backend via Caddy (`BACKEND_URL=http://caddy/api`); httpx client created in `dp.startup`,
+    kept in `dp["backend"]` (not a global). Photos downloaded into `BytesIO`, never to disk.
+  - Router is built by `build_router()` (a Router attaches to one dispatcher only).
+  - `bot-setup` (one-shot, `python -m app.setup`): `set_webhook` on `PUBLIC_BASE_URL/tg/webhook`
+    with `secret_token`, commands (admins get `/new` via `BotCommandScopeChat`), Mini App menu
+    button. Replicas never call `set_webhook`. Gets no `INTERNAL_TOKEN`.
+  - Telegram needs HTTPS: `PUBLIC_BASE_URL`/`WEBAPP_URL` are https-only; locally use a tunnel.
 - Settings: `DatabaseSettings` (POSTGRES_* only; used by alembic) ⊂ `Settings` (app).
   `migrate` gets only POSTGRES_* (`x-db-env` in compose) — least privilege.
 
@@ -53,6 +69,10 @@ Every service must run as multiple replicas at once:
 - Backend (`cd backend`): `uv sync`; `uv run pytest` (needs Docker: testcontainers
   Postgres + MinIO, same images as compose); `uv run ruff check . && uv run ruff format --check .`;
   `uv run alembic revision -m "..."` for a new migration (needs only POSTGRES_* env).
+- Bot (`cd bot`): `uv sync`; `uv run pytest` (no Docker, fake Bot API session + httpx
+  MockTransport); `uv run ruff check . && uv run ruff format --check .`.
+- `docker compose run --rm bot-setup` — re-register webhook/commands/menu (idempotent).
+- After editing `infra/Caddyfile`: `docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile`.
 - Create a product by hand: `curl -H "X-Internal-Token: $INTERNAL_TOKEN" -F title=Mug
   -F chat_id=1 -F message_id=1 -F image=@mug.jpg localhost:8080/api/products`.
 

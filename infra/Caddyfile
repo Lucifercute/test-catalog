@@ -39,6 +39,26 @@
 		}
 	}
 
+	# Telegram webhook -> bot replicas, same balancing as /api. Path is kept as is.
+	# POST only; the bot itself checks X-Telegram-Bot-Api-Secret-Token.
+	# Caddy retries a POST only on dial errors, so an update is never processed twice by a retry.
+	handle /tg/webhook {
+		route {
+			@notpost not method POST
+			header @notpost Allow "POST"
+			respond @notpost 405
+
+			reverse_proxy {
+				dynamic a bot 8080 {
+					refresh 5s
+				}
+				lb_policy round_robin
+				lb_retries 2
+				fail_duration 10s
+			}
+		}
+	}
+
 	handle {
 		respond 404
 	}

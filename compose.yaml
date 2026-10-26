@@ -18,6 +18,12 @@ x-backend-env: &backend-env
   INTERNAL_TOKEN: ${INTERNAL_TOKEN:?set in .env}
   MAX_IMAGE_BYTES: ${MAX_IMAGE_BYTES:-10485760}
 
+x-telegram-env: &telegram-env
+  BOT_TOKEN: ${BOT_TOKEN:?set in .env}
+  WEBHOOK_SECRET: ${WEBHOOK_SECRET:?set in .env}
+  WEBAPP_URL: ${WEBAPP_URL:?set in .env}
+  ADMIN_IDS: ${ADMIN_IDS:-}
+
 services:
   postgres:
     image: postgres:18.6-alpine
@@ -125,6 +131,37 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
+
+  bot:
+    build: ./bot
+    image: test-catalog-bot
+    restart: unless-stopped
+    environment:
+      <<: *telegram-env
+      # Through Caddy, so requests are balanced across backend replicas.
+      BACKEND_URL: http://caddy/api
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN:?set in .env}
+    deploy:
+      replicas: 2
+    # No host ports: Telegram reaches it through Caddy (/tg/webhook).
+    # Caddy doesn't depend on bot: `dynamic a` resolves replicas lazily (no cycle).
+    depends_on:
+      caddy:
+        condition: service_healthy
+
+  # One-shot: set_webhook, commands, menu button. Idempotent. Replicas never touch the webhook.
+  bot-setup:
+    build: ./bot
+    image: test-catalog-bot
+    restart: "no"
+    command: ["python", "-m", "app.setup"]
+    environment:
+      <<: *telegram-env
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?set in .env}
+    # Turn the webhook on only once replicas can take updates.
+    depends_on:
+      bot:
+        condition: service_healthy
 
 volumes:
   pg_data:
