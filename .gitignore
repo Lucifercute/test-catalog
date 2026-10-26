@@ -41,3 +41,6 @@ pnpm-debug.log*
 *.swp
 .DS_Store
 Thumbs.db
+
+# --- Deploy ---
+scripts/deploy.conf

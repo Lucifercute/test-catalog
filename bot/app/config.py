@@ -45,7 +45,7 @@ class SetupSettings(TelegramSettings):
 
 class Settings(TelegramSettings):
     # Through Caddy, so requests are balanced across backend replicas.
-    backend_url: AnyHttpUrl = AnyHttpUrl("http://caddy/api")
+    backend_url: AnyHttpUrl = AnyHttpUrl("http://caddy:8081/api")
     # Shared secret sent to the backend in X-Internal-Token.
     internal_token: SecretStr = Field(min_length=16)
     # Well below aiogram's 55 s webhook budget.

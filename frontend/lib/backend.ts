@@ -11,7 +11,7 @@ export type Product = {
 const TIMEOUT_MS = 5000;
 
 export async function getProducts(): Promise<Product[]> {
-  // Server-only: internal address (http://caddy/api in compose), never sent to the browser.
+  // Server-only: internal address (http://caddy:8081/api in compose), never sent to the browser.
   const baseUrl = process.env.BACKEND_URL;
   if (!baseUrl) {
     throw new Error("BACKEND_URL is not set");

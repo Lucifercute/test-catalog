@@ -1,0 +1,9 @@
+# Copy to scripts/deploy.conf (gitignored: the repo is public) and fill in.
+# SSH target of the server.
+DEPLOY_HOST=opc@203.0.113.10
+# Private key for that host.
+DEPLOY_SSH_KEY=~/.ssh/id_ed25519
+# Repo checkout on the server (git clone target from docs/deploy.md).
+DEPLOY_PATH=/opt/test-catalog
+# Public domain = SITE_ADDRESS in the server's .env; health is checked at https://<domain>/api/health.
+DEPLOY_DOMAIN=example.sslip.io

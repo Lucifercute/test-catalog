@@ -8,8 +8,13 @@ users browse them in a Next.js page that also runs as a Telegram Mini App.
 - `bot/`      — aiogram 3, webhook mode. Talks to backend over HTTP only.
 - `frontend/` — Next.js 16 App Router (TypeScript 5.9 — Next doesn't officially support TS 6/7). Fetches data from backend.
 - `infra/`    — infrastructure configs (`infra/Caddyfile`).
-- Caddy (`caddy:2.11.7-alpine`) is the ONLY published entry point (`CADDY_HTTP_PORT`, default 8080;
-  HTTP now, HTTPS at deploy). Backend has no host ports.
+- Caddy (`caddy:2.11.7-alpine`) is the ONLY published entry point. Routes live in the `(app)` snippet,
+  served by two sites:
+  - `{$SITE_ADDRESS}` — public. Locally `:80` (plain HTTP, host port `CADDY_HTTP_PORT`=8080); on the server
+    the domain → automatic HTTPS (Let's Encrypt, certs in `caddy_data`), 80 → 443 redirect.
+  - `:8081` — internal, never published: `BACKEND_URL=http://caddy:8081/api` for bot/frontend and the
+    healthcheck (a domain site wouldn't match Host `caddy`/`127.0.0.1` and would redirect).
+  - Caddyfile bind mount has `:z` (SELinux Enforcing on the server).
   - `/api/*` → backend, prefix stripped; `dynamic a backend 8000` makes each replica its own
     upstream, `round_robin`, no sticky sessions (passive health + `lb_retries`).
   - `/media/*` → MinIO `/$MINIO_BUCKET/*`, GET/HEAD only (else 405), query string dropped,
@@ -18,7 +23,13 @@ users browse them in a Next.js page that also runs as a Telegram Mini App.
     path kept. The bot itself checks `X-Telegram-Bot-Api-Secret-Token` (401).
   - `/healthz` — Caddy's own healthcheck.
   - everything else (fallback `handle`) → frontend replicas (`dynamic a frontend 3000`, same balancing).
-- `compose.yaml` (repo root) — all services; `docker compose up -d` reads `.env` from root.
+- `compose.yaml` (repo root) — all services, prod-safe: only Caddy's 80/443 (+443/udp) published.
+  `docker compose up -d` reads `.env` from root.
+  - `compose.override.yaml` — dev-only host ports (Postgres 5432, MinIO 9000/9001, Caddy 8080 via `!override`);
+    auto-loaded locally, skipped on the server by `COMPOSE_FILE=compose.yaml` in its `.env`.
+    Never add `ports:` to `compose.yaml` except Caddy's.
+  - Every service has `deploy.resources.limits.memory` and `logging: *logging` (rotation) — the server is
+    shared; keep both on any new service.
   - MinIO images are `pgsty/minio` / `pgsty/mc` (official minio/* images are no longer published).
   - One-shot `minio-init` creates `$MINIO_BUCKET` with anonymous read; app services
     should depend on it with `condition: service_completed_successfully`.
@@ -36,7 +47,7 @@ users browse them in a Next.js page that also runs as a Telegram Mini App.
   answered to the admin and acked with 200; so are `TelegramForbiddenError`/`TelegramBadRequest`
   (narrow `router.errors` handler). Never add a catch-all errors handler — it would kill the retry.
   - No FSM (`Dispatcher(disable_fsm=True)`): admin sends photo + caption in one message.
-  - Backend via Caddy (`BACKEND_URL=http://caddy/api`); httpx client created in `dp.startup`,
+  - Backend via Caddy (`BACKEND_URL=http://caddy:8081/api`); httpx client created in `dp.startup`,
     kept in `dp["backend"]` (not a global). Photos downloaded into `BytesIO`, never to disk.
   - Router is built by `build_router()` (a Router attaches to one dispatcher only).
   - `bot-setup` (one-shot, `python -m app.setup`): `set_webhook` on `PUBLIC_BASE_URL/tg/webhook`
@@ -45,7 +56,7 @@ users browse them in a Next.js page that also runs as a Telegram Mini App.
   - Telegram needs HTTPS: `PUBLIC_BASE_URL`/`WEBAPP_URL` are https-only; locally use a tunnel.
 - Frontend (`frontend/`, `next start` via standalone `server.js` on :3000, 2 replicas, no host ports):
   - `/` — server component, `dynamic = 'force-dynamic'`, `fetch` with `cache: 'no-store'` and a 5 s
-    timeout (`lib/backend.ts`, `import 'server-only'`). `BACKEND_URL=http://caddy/api` is server-only,
+    timeout (`lib/backend.ts`, `import 'server-only'`). `BACKEND_URL=http://caddy:8081/api` is server-only,
     never `NEXT_PUBLIC_*`. Empty list → «Товаров пока нет»; backend error → message, page still 200.
   - Images: plain `<img src={image_url}>`, never `next/image` (its optimizer caches on each replica's
     disk; `images.unoptimized` too). `MEDIA_BASE_URL=/media` — page and images share Caddy's origin.
@@ -85,6 +96,9 @@ Every service must run as multiple replicas at once:
 - Frontend (`cd frontend`): `npm ci`; `npm run typecheck && npm run build`;
   `BACKEND_URL=http://localhost:8080/api npm run dev` (needs compose running).
 - `docker compose run --rm bot-setup` — re-register webhook/commands/menu (idempotent).
+- `scripts/deploy.sh` — deploy main: refuses on dirty tree / non-main → push → ssh `git pull --ff-only`,
+  port guard (only 80/443), `docker compose up -d --build`, `ps` → checks `https://<domain>/api/health`.
+  Settings in gitignored `scripts/deploy.conf` (template `.example`). First-time server setup: `docs/deploy.md`.
 - After editing `infra/Caddyfile`: `docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile`.
 - Create a product by hand: `curl -H "X-Internal-Token: $INTERNAL_TOKEN" -F title=Mug
   -F chat_id=1 -F message_id=1 -F image=@mug.jpg localhost:8080/api/products`.

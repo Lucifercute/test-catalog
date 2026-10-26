@@ -1,6 +1,9 @@
-# Single entry point. HTTP only for now; at deploy the site address becomes the domain
-# and Caddy turns on automatic HTTPS.
-:80 {
+# Single entry point. Routes live in the `app` snippet, served by two sites:
+# - {$SITE_ADDRESS}: the public one. Locally ":80" (plain HTTP, any host); on the server the domain,
+#   so Caddy turns on automatic HTTPS (Let's Encrypt, certs in the caddy_data volume) and redirects 80 -> 443.
+# - :8081: internal, never published. bot/frontend reach the backend via http://caddy:8081/api and the
+#   healthcheck hits it: with a domain site, Host "caddy"/"127.0.0.1" wouldn't match and would get redirected.
+(app) {
 	handle /healthz {
 		respond "OK" 200
 	}
@@ -71,4 +74,12 @@
 			fail_duration 10s
 		}
 	}
+}
+
+{$SITE_ADDRESS} {
+	import app
+}
+
+:8081 {
+	import app
 }

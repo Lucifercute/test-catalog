@@ -1,5 +1,16 @@
 name: test-catalog
 
+# This file is the prod-safe base: only Caddy's 80/443 are published. Dev-only host ports
+# (Postgres, MinIO, Caddy on 8080) live in compose.override.yaml, which Compose loads automatically
+# locally; the server ignores it via COMPOSE_FILE=compose.yaml in its .env (see docs/deploy.md).
+
+# The server is shared: rotate logs so they can't fill the disk.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
 # Least privilege: `migrate` gets only the database settings.
 x-db-env: &db-env
   POSTGRES_HOST: postgres
@@ -35,8 +46,11 @@ services:
     volumes:
       # Postgres 18+ keeps PGDATA under /var/lib/postgresql/<major>/docker
       - pg_data:/var/lib/postgresql
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: 512M
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
@@ -54,9 +68,11 @@ services:
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set in .env}
     volumes:
       - minio_data:/data
-    ports:
-      - "${MINIO_API_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: 512M
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
       interval: 5s
@@ -76,6 +92,11 @@ services:
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set in .env}
       MINIO_BUCKET: ${MINIO_BUCKET:?set in .env}
     entrypoint: ["/bin/sh", "-c"]
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: 64M
     command:
       - |
         set -e
@@ -90,6 +111,11 @@ services:
     restart: "no"
     command: ["alembic", "upgrade", "head"]
     environment: *db-env
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: 256M
     depends_on:
       postgres:
         condition: service_healthy
@@ -99,8 +125,12 @@ services:
     image: test-catalog-backend
     restart: unless-stopped
     environment: *backend-env
+    logging: *logging
     deploy:
       replicas: 2
+      resources:
+        limits:
+          memory: 256M
     # No host ports: reachable only through Caddy (/api/*).
     depends_on:
       migrate:
@@ -115,18 +145,30 @@ services:
     restart: unless-stopped
     environment:
       MINIO_BUCKET: ${MINIO_BUCKET:?set in .env}
+      # ":80" = plain HTTP (local); a domain = automatic HTTPS (server).
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+    # The only published ports on the server. 443/udp = HTTP/3.
     ports:
-      - "${CADDY_HTTP_PORT:-8080}:80"
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
     volumes:
-      - ./infra/Caddyfile:/etc/caddy/Caddyfile:ro
+      # :z relabels for SELinux (Oracle Linux, Enforcing); a no-op on macOS.
+      - ./infra/Caddyfile:/etc/caddy/Caddyfile:ro,z
       - caddy_data:/data
       - caddy_config:/config
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      # Internal :8081 site: the public one may be a domain that redirects plain HTTP.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8081/healthz"]
       interval: 5s
       timeout: 3s
       retries: 10
       start_period: 5s
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: 128M
     depends_on:
       backend:
         condition: service_healthy
@@ -139,11 +181,15 @@ services:
     restart: unless-stopped
     environment:
       <<: *telegram-env
-      # Through Caddy, so requests are balanced across backend replicas.
-      BACKEND_URL: http://caddy/api
+      # Through Caddy's internal site, so requests are balanced across backend replicas.
+      BACKEND_URL: http://caddy:8081/api
       INTERNAL_TOKEN: ${INTERNAL_TOKEN:?set in .env}
+    logging: *logging
     deploy:
       replicas: 2
+      resources:
+        limits:
+          memory: 256M
     # No host ports: Telegram reaches it through Caddy (/tg/webhook).
     # Caddy doesn't depend on bot: `dynamic a` resolves replicas lazily (no cycle).
     depends_on:
@@ -156,9 +202,13 @@ services:
     restart: unless-stopped
     environment:
       # Server-only (not NEXT_PUBLIC_*): server components fetch through Caddy -> backend replicas.
-      BACKEND_URL: http://caddy/api
+      BACKEND_URL: http://caddy:8081/api
+    logging: *logging
     deploy:
       replicas: 2
+      resources:
+        limits:
+          memory: 256M
     # No host ports: browsers reach it through Caddy (fallback route).
     # Caddy doesn't depend on frontend: `dynamic a` resolves replicas lazily (no cycle).
     depends_on:
@@ -174,6 +224,11 @@ services:
     environment:
       <<: *telegram-env
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?set in .env}
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: 128M
     # Turn the webhook on only once replicas can take updates.
     depends_on:
       bot:
